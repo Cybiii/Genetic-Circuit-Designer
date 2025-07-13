@@ -1,0 +1,2 @@
+# This file ensures the external/ directory is tracked by git
+# External dependencies will be downloaded here during build 
