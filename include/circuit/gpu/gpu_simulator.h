@@ -5,6 +5,7 @@
 #include "../ga/genome.h"
 #include <cuda_runtime.h>
 #include <curand.h>
+#include <curand_kernel.h>
 #include <memory>
 #include <vector>
 

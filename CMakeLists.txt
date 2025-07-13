@@ -100,3 +100,19 @@ endif()
 install(TARGETS circuit_designer DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY data/ DESTINATION share/circuit_designer) 
+
+# CPU Benchmark executable
+add_executable(cpu_benchmark ../cpu_benchmark.cpp)
+target_include_directories(cpu_benchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(cpu_benchmark) 
+
+# Add CUDA device query executable if CUDA is available
+if(CUDA_FOUND)
+    add_executable(gpu_device_query ../gpu_device_query.cpp)
+    target_link_libraries(gpu_device_query ${CUDA_LIBRARIES})
+    set_target_properties(gpu_device_query PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+    )
+endif() 
