@@ -2,8 +2,12 @@
 
 #include <cstdint>
 #include <vector>
-#include <array>
 #include <memory>
+#include <string>
+#include <unordered_set>
+#include <functional>
+#include <array>
+#include <iostream>
 
 namespace circuit {
 
@@ -18,6 +22,69 @@ using NodeId = uint32_t;
 using ConnectionId = uint32_t;
 using TimeStep = uint32_t;
 using SignalValue = uint8_t;  // 0 or 1 for digital circuits
+
+// Position struct for 2D coordinates
+struct Position {
+    uint32_t x;
+    uint32_t y;
+    
+    Position() : x(0), y(0) {}
+    Position(uint32_t x_, uint32_t y_) : x(x_), y(y_) {}
+    
+    bool operator==(const Position& other) const {
+        return x == other.x && y == other.y;
+    }
+    
+    bool operator!=(const Position& other) const {
+        return !(*this == other);
+    }
+};
+
+// Logic state enumeration
+enum class LogicState : uint8_t {
+    LOW = 0,
+    HIGH = 1,
+    UNKNOWN = 2,
+    HIGH_IMPEDANCE = 3
+};
+
+// Mutation type enumeration
+enum class MutationType : uint8_t {
+    GATE_TYPE = 0,
+    CONNECTION = 1,
+    POSITION = 2,
+    ACTIVATION = 3
+};
+
+// Simulation configuration
+struct SimulationConfig {
+    float max_time;           // Maximum simulation time (ns)
+    float time_step;          // Time step size (ns)
+    float convergence_threshold; // Convergence threshold
+    uint32_t max_iterations;  // Maximum iterations
+    bool enable_debug;        // Enable debug output
+    
+    SimulationConfig() : max_time(1000.0f), time_step(0.1f), convergence_threshold(1e-6f), 
+                        max_iterations(10000), enable_debug(false) {}
+    
+    SimulationConfig(float max_t, float step, float threshold, uint32_t max_iter, bool debug)
+        : max_time(max_t), time_step(step), convergence_threshold(threshold), 
+          max_iterations(max_iter), enable_debug(debug) {}
+};
+
+// Simulation result
+struct SimulationResult {
+    bool success;
+    float total_delay;
+    float power_consumption;
+    uint32_t gate_count;
+    uint32_t switching_activity;
+    std::vector<std::vector<SignalValue>> outputs;
+    std::string error_message;
+    
+    SimulationResult() : success(false), total_delay(0.0f), power_consumption(0.0f), 
+                        gate_count(0), switching_activity(0) {}
+};
 
 // Gate types enumeration
 enum class GateType : uint8_t {
@@ -65,14 +132,21 @@ struct Connection {
 struct Gate {
     GateId id;
     GateType type;
+    Position position;
     std::vector<NodeId> inputs;
     std::vector<NodeId> outputs;
     std::vector<SignalValue> input_values;
     std::vector<SignalValue> output_values;
+    LogicState output_state;
     float propagation_delay;
     bool is_evaluated;
     
-    Gate() : id(0), type(GateType::NONE), propagation_delay(0.0f), is_evaluated(false) {}
+    Gate() : id(0), type(GateType::NONE), position(0, 0), output_state(LogicState::LOW), 
+             propagation_delay(0.0f), is_evaluated(false) {}
+             
+    Gate(GateId id_, GateType type_, Position pos, float delay)
+        : id(id_), type(type_), position(pos), output_state(LogicState::LOW), 
+          propagation_delay(delay), is_evaluated(false) {}
 };
 
 // Circuit grid dimensions
@@ -83,29 +157,36 @@ struct GridDimensions {
     
     GridDimensions() : width(0), height(0), max_gates(0) {}
     GridDimensions(uint32_t w, uint32_t h) : width(w), height(h), max_gates(w * h) {}
+    
+    bool is_valid_position(const Position& pos) const {
+        return pos.x < width && pos.y < height;
+    }
 };
 
 // Test case for circuit evaluation
 struct TestCase {
-    std::vector<SignalValue> inputs;
-    std::vector<SignalValue> expected_outputs;
+    std::vector<LogicState> inputs;
+    std::vector<LogicState> expected_outputs;
     
     TestCase() = default;
-    TestCase(const std::vector<SignalValue>& in, const std::vector<SignalValue>& out)
+    TestCase(const std::vector<LogicState>& in, const std::vector<LogicState>& out)
         : inputs(in), expected_outputs(out) {}
 };
 
 // Circuit performance metrics
 struct PerformanceMetrics {
     float correctness_score;      // 0.0 to 1.0
+    float correctness;           // Alias for correctness_score
     float total_delay;           // nanoseconds
+    float propagation_delay;     // Alias for total_delay
     uint32_t gate_count;         // number of gates used
     float power_consumption;     // watts
     float area_cost;            // arbitrary units
     uint32_t switching_activity; // number of signal transitions
     
-    PerformanceMetrics() : correctness_score(0.0f), total_delay(0.0f), gate_count(0), 
-                          power_consumption(0.0f), area_cost(0.0f), switching_activity(0) {}
+    PerformanceMetrics() : correctness_score(0.0f), correctness(0.0f), total_delay(0.0f), 
+                          propagation_delay(0.0f), gate_count(0), power_consumption(0.0f), 
+                          area_cost(0.0f), switching_activity(0) {}
 };
 
 // Fitness components for genetic algorithm
@@ -122,12 +203,24 @@ struct FitnessComponents {
 // Genome gene structure
 struct Gene {
     GateType gate_type;
-    uint32_t grid_position;  // position in the grid
-    std::array<ConnectionId, 4> input_connections;  // max 4 inputs
+    Position position;  // position in the grid
+    std::vector<ConnectionId> input_connections;   // variable number of inputs
+    std::vector<ConnectionId> output_connections;  // variable number of outputs
     bool is_active;
     
-    Gene() : gate_type(GateType::NONE), grid_position(0), is_active(false) {
-        input_connections.fill(0);
+    Gene() : gate_type(GateType::NONE), position(0, 0), is_active(false) {}
+    
+    // Equality operator for vector comparison
+    bool operator==(const Gene& other) const {
+        return gate_type == other.gate_type &&
+               position == other.position &&
+               input_connections == other.input_connections &&
+               output_connections == other.output_connections &&
+               is_active == other.is_active;
+    }
+    
+    bool operator!=(const Gene& other) const {
+        return !(*this == other);
     }
 };
 
@@ -212,4 +305,44 @@ inline GateProperties get_gate_properties(GateType type) {
     return props;
 }
 
-} // namespace circuit 
+// Add helper function for getting gate input count
+inline uint32_t get_gate_input_count(GateType type) {
+    switch (type) {
+        case GateType::INPUT:  return 0;
+        case GateType::OUTPUT: return 1;
+        case GateType::NOT:
+        case GateType::BUFFER: return 1;
+        case GateType::AND:
+        case GateType::OR:
+        case GateType::XOR:
+        case GateType::NAND:
+        case GateType::NOR:
+        case GateType::XNOR:   return 2;
+        default:               return 0;
+    }
+}
+
+// Utility functions for type conversion
+inline SignalValue logic_state_to_signal(LogicState state) {
+    switch (state) {
+        case LogicState::LOW:  return 0;
+        case LogicState::HIGH: return 1;
+        default:               return 0;  // Unknown/High-impedance defaults to 0
+    }
+}
+
+inline LogicState signal_to_logic_state(SignalValue signal) {
+    return signal == 0 ? LogicState::LOW : LogicState::HIGH;
+}
+
+} // namespace circuit
+
+// Hash function for Position (required for std::unordered_set<Position>)
+namespace std {
+    template<>
+    struct hash<circuit::Position> {
+        std::size_t operator()(const circuit::Position& pos) const {
+            return std::hash<uint32_t>()(pos.x) ^ (std::hash<uint32_t>()(pos.y) << 1);
+        }
+    };
+}

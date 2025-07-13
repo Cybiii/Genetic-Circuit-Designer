@@ -1,6 +1,8 @@
 #pragma once
 
 #include "../core/types.h"
+#include "../core/circuit.h"
+#include "../ga/genetic_algorithm.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -8,6 +10,11 @@
 #include <iostream>
 #include <fstream>
 #include <unordered_map>
+#include <future>
+#include <thread>
+#include <mutex>
+#include <queue>
+#include <filesystem>
 
 namespace circuit {
 

@@ -16,33 +16,34 @@ target_link_libraries(circuit_core
     circuit_utils
 )
 
-# GPU library
-add_library(circuit_gpu
-    gpu/gpu_simulator.cpp
-    gpu/gpu_memory.cpp
-    gpu/circuit_kernels.cu
-    gpu/genetic_kernels.cu
-    gpu/cuda_utils.cpp
-)
+# GPU library (optional)
+if(ENABLE_GPU)
+    add_library(circuit_gpu
+        gpu/gpu_simulator.cpp
+        gpu/gpu_memory.cpp
+        gpu/circuit_kernels.cu
+        gpu/genetic_kernels.cu
+    )
 
-target_include_directories(circuit_gpu PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-)
+    target_include_directories(circuit_gpu PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
 
-target_link_libraries(circuit_gpu
-    circuit_core
-    circuit_utils
-    ${CUDA_LIBRARIES}
-    ${CUDA_CUBLAS_LIBRARIES}
-    ${CUDA_CURAND_LIBRARIES}
-)
+    target_link_libraries(circuit_gpu
+        circuit_core
+        circuit_utils
+        ${CUDA_LIBRARIES}
+        ${CUDA_CUBLAS_LIBRARIES}
+        ${CUDA_CURAND_LIBRARIES}
+    )
 
-# Set CUDA properties
-set_target_properties(circuit_gpu PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-    POSITION_INDEPENDENT_CODE ON
-)
+    # Set CUDA properties
+    set_target_properties(circuit_gpu PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
 
 # Genetic Algorithm library
 add_library(circuit_ga
@@ -52,8 +53,6 @@ add_library(circuit_ga
     ga/crossover.cpp
     ga/mutation.cpp
     ga/fitness_evaluation.cpp
-    ga/population.cpp
-    ga/evolution_strategies.cpp
 )
 
 target_include_directories(circuit_ga PUBLIC
@@ -66,47 +65,46 @@ target_link_libraries(circuit_ga
 )
 
 # Conditionally link GPU support if available
-if(CUDA_FOUND)
+if(ENABLE_GPU)
     target_link_libraries(circuit_ga circuit_gpu)
     target_compile_definitions(circuit_ga PRIVATE CUDA_ENABLED)
 endif()
 
-# Visualization library
-add_library(circuit_viz
-    viz/visualization.cpp
-    viz/circuit_renderer.cpp
-    viz/evolution_visualizer.cpp
-    viz/interactive_builder.cpp
-    viz/color_schemes.cpp
-    viz/opengl_utils.cpp
-    viz/imgui_integration.cpp
-)
+# Visualization library (optional)
+if(ENABLE_VISUALIZATION)
+    add_library(circuit_viz
+        viz/visualization.cpp
+        viz/circuit_renderer.cpp
+        viz/evolution_visualizer.cpp
+        viz/opengl_utils.cpp
+    )
 
-target_include_directories(circuit_viz PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-)
+    target_include_directories(circuit_viz PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    )
 
-target_link_libraries(circuit_viz
-    circuit_core
-    circuit_ga
-    circuit_utils
-    ${OPENGL_LIBRARIES}
-    glfw
-    ${CMAKE_DL_LIBS}
-)
+    target_link_libraries(circuit_viz
+        circuit_core
+        circuit_ga
+        circuit_utils
+    )
+
+    # Link OpenGL libraries if available
+    if(OpenGL_FOUND)
+        target_link_libraries(circuit_viz ${OPENGL_LIBRARIES})
+    endif()
+    
+    if(glfw3_FOUND)
+        target_link_libraries(circuit_viz glfw)
+    endif()
+endif()
 
 # Utils library
 add_library(circuit_utils
     utils/logger.cpp
     utils/profiler.cpp
     utils/file_utils.cpp
-    utils/string_utils.cpp
     utils/math_utils.cpp
-    utils/memory_utils.cpp
-    utils/config_manager.cpp
-    utils/error_handler.cpp
-    utils/thread_utils.cpp
-    utils/circuit_utils.cpp
 )
 
 target_include_directories(circuit_utils PUBLIC
@@ -120,15 +118,42 @@ elseif(UNIX)
     target_link_libraries(circuit_utils pthread)
 endif()
 
-# Set library properties
-set_target_properties(circuit_core circuit_ga circuit_viz circuit_utils PROPERTIES
+# Set library properties for always-built targets
+set_target_properties(circuit_core circuit_ga circuit_utils PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     POSITION_INDEPENDENT_CODE ON
 )
 
+# Set properties for optional targets
+if(ENABLE_GPU)
+    set_target_properties(circuit_gpu PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
+
+if(ENABLE_VISUALIZATION)
+    set_target_properties(circuit_viz PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()
+
 # Install targets
-install(TARGETS circuit_core circuit_ga circuit_viz circuit_utils
+set(INSTALL_TARGETS circuit_core circuit_ga circuit_utils)
+
+if(ENABLE_GPU)
+    list(APPEND INSTALL_TARGETS circuit_gpu)
+endif()
+
+if(ENABLE_VISUALIZATION)
+    list(APPEND INSTALL_TARGETS circuit_viz)
+endif()
+
+install(TARGETS ${INSTALL_TARGETS}
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
@@ -137,9 +162,15 @@ install(TARGETS circuit_core circuit_ga circuit_viz circuit_utils
 # Create main executable target in parent scope
 set(CIRCUIT_LIBRARIES 
     circuit_core
-    circuit_gpu
     circuit_ga
-    circuit_viz
     circuit_utils
     PARENT_SCOPE
-) 
+)
+
+if(ENABLE_GPU)
+    set(CIRCUIT_LIBRARIES ${CIRCUIT_LIBRARIES} circuit_gpu PARENT_SCOPE)
+endif()
+
+if(ENABLE_VISUALIZATION)
+    set(CIRCUIT_LIBRARIES ${CIRCUIT_LIBRARIES} circuit_viz PARENT_SCOPE)
+endif() 
