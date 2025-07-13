@@ -116,3 +116,10 @@ if(CUDA_FOUND)
         CUDA_SEPARABLE_COMPILATION ON
     )
 endif() 
+
+# Phase 3 GPU Test executable
+add_executable(phase3_gpu_test ../phase3_gpu_test.cpp)
+target_include_directories(phase3_gpu_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
+target_link_libraries(phase3_gpu_test circuit_core circuit_ga circuit_utils) 

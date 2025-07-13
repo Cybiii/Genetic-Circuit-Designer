@@ -25,15 +25,23 @@ float evaluate_genome_fitness(const Genome& genome,
     uint32_t valid_tests = 0;
     
     for (const auto& test_case : test_cases) {
+        // Convert LogicState inputs to SignalValue
+        std::vector<SignalValue> signal_inputs;
+        for (const auto& input : test_case.inputs) {
+            signal_inputs.push_back(logic_state_to_signal(input));
+        }
+        
         // Simulate circuit with test case
         std::vector<SignalValue> outputs;
-        bool success = circuit->simulate(test_case.inputs, outputs);
+        bool success = circuit->simulate(signal_inputs, outputs);
         
         // Check correctness
         bool correct = true;
         if (success && outputs.size() == test_case.expected_outputs.size()) {
             for (uint32_t i = 0; i < outputs.size(); ++i) {
-                if (outputs[i] != test_case.expected_outputs[i]) {
+                LogicState expected = test_case.expected_outputs[i];
+                LogicState actual = signal_to_logic_state(outputs[i]);
+                if (actual != expected) {
                     correct = false;
                     break;
                 }
@@ -46,10 +54,11 @@ float evaluate_genome_fitness(const Genome& genome,
             total_correctness += 1.0f;
         }
         
-        // Accumulate performance metrics
-        total_delay += result.propagation_delay;
-        total_power += result.power_consumption;
-        total_area += result.area_cost;
+        // Get performance metrics from circuit
+        auto performance = circuit->evaluate_performance(std::vector<TestCase>{test_case});
+        total_delay += performance.total_delay;
+        total_power += performance.power_consumption;
+        total_area += performance.area_cost;
         valid_tests++;
     }
     
@@ -101,13 +110,22 @@ void evaluate_population_fitness(GenomePopulation& population,
             float correctness = 0.0f;
             
             for (const auto& test_case : test_cases) {
-                auto result = circuit->simulate(test_case.inputs);
+                // Convert LogicState inputs to SignalValue
+                std::vector<SignalValue> signal_inputs;
+                for (const auto& input : test_case.inputs) {
+                    signal_inputs.push_back(logic_state_to_signal(input));
+                }
+                
+                std::vector<SignalValue> outputs;
+                bool success = circuit->simulate(signal_inputs, outputs);
                 
                 // Check correctness
                 bool correct = true;
-                if (result.outputs.size() == test_case.expected_outputs.size()) {
-                    for (uint32_t j = 0; j < result.outputs.size(); ++j) {
-                        if (result.outputs[j] != test_case.expected_outputs[j]) {
+                if (success && outputs.size() == test_case.expected_outputs.size()) {
+                    for (uint32_t j = 0; j < outputs.size(); ++j) {
+                        LogicState expected = test_case.expected_outputs[j];
+                        LogicState actual = signal_to_logic_state(outputs[j]);
+                        if (actual != expected) {
                             correct = false;
                             break;
                         }
@@ -120,9 +138,10 @@ void evaluate_population_fitness(GenomePopulation& population,
                     correctness += 1.0f;
                 }
                 
-                total_delay += result.propagation_delay;
-                total_power += result.power_consumption;
-                total_area += result.area_cost;
+                auto performance = circuit->evaluate_performance(std::vector<TestCase>{test_case});
+                total_delay += performance.total_delay;
+                total_power += performance.power_consumption;
+                total_area += performance.area_cost;
             }
             
             metrics.correctness = correctness / test_cases.size();
@@ -167,13 +186,22 @@ std::vector<float> evaluate_multi_objective_fitness(const Genome& genome,
     float total_area = 0.0f;
     
     for (const auto& test_case : test_cases) {
-        auto result = circuit->simulate(test_case.inputs);
+        // Convert LogicState inputs to SignalValue
+        std::vector<SignalValue> signal_inputs;
+        for (const auto& input : test_case.inputs) {
+            signal_inputs.push_back(logic_state_to_signal(input));
+        }
+        
+        std::vector<SignalValue> outputs;
+        bool success = circuit->simulate(signal_inputs, outputs);
         
         // Check correctness
         bool correct = true;
-        if (result.outputs.size() == test_case.expected_outputs.size()) {
-            for (uint32_t i = 0; i < result.outputs.size(); ++i) {
-                if (result.outputs[i] != test_case.expected_outputs[i]) {
+        if (success && outputs.size() == test_case.expected_outputs.size()) {
+            for (uint32_t i = 0; i < outputs.size(); ++i) {
+                LogicState expected = test_case.expected_outputs[i];
+                LogicState actual = signal_to_logic_state(outputs[i]);
+                if (actual != expected) {
                     correct = false;
                     break;
                 }
@@ -186,9 +214,10 @@ std::vector<float> evaluate_multi_objective_fitness(const Genome& genome,
             total_correctness += 1.0f;
         }
         
-        total_delay += result.propagation_delay;
-        total_power += result.power_consumption;
-        total_area += result.area_cost;
+        auto performance = circuit->evaluate_performance(std::vector<TestCase>{test_case});
+        total_delay += performance.total_delay;
+        total_power += performance.power_consumption;
+        total_area += performance.area_cost;
     }
     
     // Normalize and return objectives
@@ -198,259 +227,6 @@ std::vector<float> evaluate_multi_objective_fitness(const Genome& genome,
     objectives.push_back(-total_area / test_cases.size());        // Minimize area
     
     return objectives;
-}
-
-// Fitness evaluation with dynamic test cases
-float evaluate_dynamic_fitness(const Genome& genome,
-                              const std::vector<TestCase>& base_test_cases,
-                              const FitnessComponents& weights,
-                              uint32_t generation) {
-    // Create dynamic test cases based on generation
-    std::vector<TestCase> dynamic_tests = base_test_cases;
-    
-    // Add more challenging test cases as evolution progresses
-    if (generation > 100) {
-        // Add stress test cases
-        for (const auto& base_test : base_test_cases) {
-            TestCase stress_test = base_test;
-            // Modify inputs to create edge cases
-            for (auto& input : stress_test.inputs) {
-                input = (input == LogicState::HIGH) ? LogicState::LOW : LogicState::HIGH;
-            }
-            dynamic_tests.push_back(stress_test);
-        }
-    }
-    
-    return evaluate_genome_fitness(genome, dynamic_tests, weights);
-}
-
-// Fitness evaluation with noise robustness
-float evaluate_robust_fitness(const Genome& genome,
-                             const std::vector<TestCase>& test_cases,
-                             const FitnessComponents& weights,
-                             float noise_level,
-                             std::mt19937& rng) {
-    auto circuit = genome.to_circuit();
-    if (!circuit) {
-        return 0.0f;
-    }
-    
-    float total_fitness = 0.0f;
-    const uint32_t noise_trials = 10;
-    
-    std::uniform_real_distribution<float> noise_dist(0.0f, 1.0f);
-    
-    for (uint32_t trial = 0; trial < noise_trials; ++trial) {
-        std::vector<TestCase> noisy_tests;
-        
-        // Add noise to test cases
-        for (const auto& test_case : test_cases) {
-            TestCase noisy_test = test_case;
-            
-            // Add noise to inputs
-            for (auto& input : noisy_test.inputs) {
-                if (noise_dist(rng) < noise_level) {
-                    // Flip the input
-                    input = (input == LogicState::HIGH) ? LogicState::LOW : LogicState::HIGH;
-                }
-            }
-            
-            noisy_tests.push_back(noisy_test);
-        }
-        
-        // Evaluate with noisy test cases
-        float trial_fitness = evaluate_genome_fitness(genome, noisy_tests, weights);
-        total_fitness += trial_fitness;
-    }
-    
-    return total_fitness / noise_trials;
-}
-
-// Fitness evaluation with complexity penalty
-float evaluate_complexity_fitness(const Genome& genome,
-                                 const std::vector<TestCase>& test_cases,
-                                 const FitnessComponents& weights,
-                                 float complexity_penalty) {
-    float base_fitness = evaluate_genome_fitness(genome, test_cases, weights);
-    
-    // Calculate complexity penalty
-    auto stats = genome.get_statistics();
-    float complexity = stats.complexity_score;
-    
-    // Apply penalty
-    float penalty = complexity_penalty * complexity;
-    
-    return std::max(0.0f, base_fitness - penalty);
-}
-
-// Fitness evaluation with diversity bonus
-float evaluate_diversity_fitness(const Genome& genome,
-                                const std::vector<TestCase>& test_cases,
-                                const FitnessComponents& weights,
-                                const GenomePopulation& population,
-                                float diversity_bonus) {
-    float base_fitness = evaluate_genome_fitness(genome, test_cases, weights);
-    
-    // Calculate diversity bonus
-    float min_similarity = 1.0f;
-    for (uint32_t i = 0; i < population.size(); ++i) {
-        float similarity = calculate_genome_similarity(genome, population[i]);
-        min_similarity = std::min(min_similarity, similarity);
-    }
-    
-    float diversity = 1.0f - min_similarity;
-    float bonus = diversity_bonus * diversity;
-    
-    return base_fitness + bonus;
-}
-
-// Fitness evaluation with hierarchical decomposition
-float evaluate_hierarchical_fitness(const Genome& genome,
-                                   const std::vector<TestCase>& test_cases,
-                                   const FitnessComponents& weights) {
-    // Break down fitness evaluation into hierarchical components
-    
-    // Level 1: Basic functionality
-    float functionality_score = 0.0f;
-    auto circuit = genome.to_circuit();
-    if (circuit) {
-        uint32_t correct_outputs = 0;
-        for (const auto& test_case : test_cases) {
-            auto result = circuit->simulate(test_case.inputs);
-            if (result.outputs.size() == test_case.expected_outputs.size()) {
-                bool all_correct = true;
-                for (uint32_t i = 0; i < result.outputs.size(); ++i) {
-                    if (result.outputs[i] != test_case.expected_outputs[i]) {
-                        all_correct = false;
-                        break;
-                    }
-                }
-                if (all_correct) {
-                    correct_outputs++;
-                }
-            }
-        }
-        functionality_score = static_cast<float>(correct_outputs) / test_cases.size();
-    }
-    
-    // Level 2: Performance metrics (only if functionality is good)
-    float performance_score = 0.0f;
-    if (functionality_score > 0.5f) {
-        float total_delay = 0.0f;
-        float total_power = 0.0f;
-        
-        for (const auto& test_case : test_cases) {
-            auto result = circuit->simulate(test_case.inputs);
-            total_delay += result.propagation_delay;
-            total_power += result.power_consumption;
-        }
-        
-        // Normalize performance (lower is better)
-        float avg_delay = total_delay / test_cases.size();
-        float avg_power = total_power / test_cases.size();
-        
-        performance_score = 1.0f / (1.0f + avg_delay + avg_power);
-    }
-    
-    // Level 3: Complexity and elegance (only if performance is good)
-    float elegance_score = 0.0f;
-    if (performance_score > 0.3f) {
-        auto stats = genome.get_statistics();
-        float complexity = stats.complexity_score;
-        elegance_score = 1.0f / (1.0f + complexity);
-    }
-    
-    // Combine hierarchical scores
-    float total_fitness = weights.correctness_weight * functionality_score +
-                         weights.delay_weight * performance_score +
-                         weights.power_weight * elegance_score;
-    
-    return total_fitness;
-}
-
-// Adaptive fitness evaluation
-float evaluate_adaptive_fitness(const Genome& genome,
-                               const std::vector<TestCase>& test_cases,
-                               FitnessComponents& weights,
-                               uint32_t generation) {
-    // Adapt weights based on generation
-    if (generation < 100) {
-        // Early generations: focus on correctness
-        weights.correctness_weight = 1.0f;
-        weights.delay_weight = 0.1f;
-        weights.power_weight = 0.1f;
-        weights.area_weight = 0.1f;
-    } else if (generation < 300) {
-        // Mid generations: balance correctness and performance
-        weights.correctness_weight = 0.7f;
-        weights.delay_weight = 0.3f;
-        weights.power_weight = 0.2f;
-        weights.area_weight = 0.2f;
-    } else {
-        // Late generations: optimize performance
-        weights.correctness_weight = 0.5f;
-        weights.delay_weight = 0.4f;
-        weights.power_weight = 0.3f;
-        weights.area_weight = 0.3f;
-    }
-    
-    return evaluate_genome_fitness(genome, test_cases, weights);
-}
-
-// Fitness evaluation with partial credit
-float evaluate_partial_credit_fitness(const Genome& genome,
-                                     const std::vector<TestCase>& test_cases,
-                                     const FitnessComponents& weights) {
-    auto circuit = genome.to_circuit();
-    if (!circuit) {
-        return 0.0f;
-    }
-    
-    float total_score = 0.0f;
-    
-    for (const auto& test_case : test_cases) {
-        auto result = circuit->simulate(test_case.inputs);
-        
-        if (result.outputs.size() == test_case.expected_outputs.size()) {
-            // Calculate partial credit for each output
-            float output_score = 0.0f;
-            for (uint32_t i = 0; i < result.outputs.size(); ++i) {
-                if (result.outputs[i] == test_case.expected_outputs[i]) {
-                    output_score += 1.0f;
-                } else {
-                    // Partial credit for "close" outputs
-                    output_score += 0.1f;
-                }
-            }
-            
-            total_score += output_score / result.outputs.size();
-        }
-    }
-    
-    float correctness = total_score / test_cases.size();
-    
-    // Apply performance penalties
-    float total_delay = 0.0f;
-    float total_power = 0.0f;
-    float total_area = 0.0f;
-    
-    for (const auto& test_case : test_cases) {
-        auto result = circuit->simulate(test_case.inputs);
-        total_delay += result.propagation_delay;
-        total_power += result.power_consumption;
-        total_area += result.area_cost;
-    }
-    
-    float avg_delay = total_delay / test_cases.size();
-    float avg_power = total_power / test_cases.size();
-    float avg_area = total_area / test_cases.size();
-    
-    float fitness = weights.correctness_weight * correctness -
-                   weights.delay_weight * avg_delay -
-                   weights.power_weight * avg_power -
-                   weights.area_weight * avg_area;
-    
-    return std::max(0.0f, fitness);
 }
 
 // Utility function to create fitness components for different problems
